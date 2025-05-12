@@ -35,40 +35,56 @@ const io = new Server(httpServer, {
 
 // Socket.IO event handlers
 io.on('connection', (socket) => {
-  console.log('Client connected');
+  if (process.env.NODE_ENV !== 'production') {
+    console.log('Client connected');
+  }
 
   socket.on('join-room', (roomId) => {
     socket.join(roomId);
-    console.log(`Client joined room: ${roomId}`);
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`Client joined room: ${roomId}`);
+    }
   });
 
   socket.on('leave-room', (roomId) => {
     socket.leave(roomId);
-    console.log(`Client left room: ${roomId}`);
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`Client left room: ${roomId}`);
+    }
   });
 
   socket.on('poll-update', ({ roomId, poll }) => {
     io.to(roomId).emit('poll-update', poll);
-    console.log(`Poll updated in room: ${roomId}`);
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`Poll updated in room: ${roomId}`);
+    }
   });
 
   socket.on('new-trivia', ({ roomId, trivia }) => {
     io.to(roomId).emit('new-trivia', trivia);
-    console.log(`New trivia in room: ${roomId}`);
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`New trivia in room: ${roomId}`);
+    }
   });
 
   socket.on('video-sync', ({ roomId, videoState }) => {
     socket.to(roomId).emit('video-sync', videoState);
-    console.log(`Video sync in room: ${roomId}`);
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`Video sync in room: ${roomId}`);
+    }
   });
 
   socket.on('user-synced', ({ roomId, userId, username }) => {
     socket.to(roomId).emit('user-synced', { userId, username });
-    console.log(`User ${username} synced in room: ${roomId}`);
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`User ${username} synced in room: ${roomId}`);
+    }
   });
 
   socket.on('disconnect', () => {
-    console.log('Client disconnected');
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('Client disconnected');
+    }
   });
 });
 

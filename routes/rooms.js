@@ -372,10 +372,32 @@ router.get('/:roomId/messages', auth, async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(req.params.roomId)) {
       return res.status(400).json({ error: 'Invalid room ID' });
     }
-    const messages = await Message.find({ room: req.params.roomId })
+
+    const limit = parseInt(req.query.limit) || 20;
+    const before = req.query.before;
+
+    let query = { room: req.params.roomId };
+    if (before) {
+      // If before is a valid ISO date string, use timestamp filter
+      const beforeDate = new Date(before);
+      if (!isNaN(beforeDate.getTime())) {
+        query.timestamp = { $lt: beforeDate };
+      } else if (mongoose.Types.ObjectId.isValid(before)) {
+        // If before is a valid ObjectId, find message with that ID to get timestamp
+        const beforeMessage = await Message.findById(before);
+        if (beforeMessage) {
+          query.timestamp = { $lt: beforeMessage.timestamp };
+        }
+      }
+    }
+
+    const messages = await Message.find(query)
       .populate('user', 'username')
-      .sort({ timestamp: 1 });
-    res.json(messages);
+      .sort({ timestamp: -1 })
+      .limit(limit);
+
+    // Return messages sorted ascending for display
+    res.json(messages.reverse());
   } catch (error) {
     console.error('Error fetching messages:', error);
     res.status(500).json({ error: error.message });
