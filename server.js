@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
+const fileUpload = require('express-fileupload');
 const { createServer } = require('http');
 const { Server } = require('socket.io');
 const authRoutes = require('./routes/auth');
@@ -9,7 +10,6 @@ const roomsRoutes = require('./routes/rooms');
 const moviesRoutes = require('./routes/movies');
 const triviaRoutes = require('./routes/trivia');
 const usersRoutes = require('./routes/users');
-const uploadRoutes = require('./routes/upload');
 
 const app = express();
 const httpServer = createServer(app);
@@ -76,13 +76,20 @@ app.options('*', cors());
 // Middleware
 app.use(express.json());
 
+// Add express-fileupload middleware
+app.use(fileUpload({
+  useTempFiles: true,
+  tempFileDir: '/tmp/',
+  createParentPath: true,
+}));
+
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/rooms', roomsRoutes);
 app.use('/api/movies', moviesRoutes);
 app.use('/api/trivia', triviaRoutes);
 app.use('/api/users', usersRoutes);
-app.use('/api/upload', uploadRoutes);
+/* Removed undefined uploadRoutes usage since user routes handle uploads */
 
 // Debug route
 app.get('/api/debug', (req, res) => {
