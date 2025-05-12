@@ -15,9 +15,19 @@ const app = express();
 const httpServer = createServer(app);
 
 // Configure Socket.IO with CORS
+const allowedOrigins = ['http://localhost:3000', 'https://stream-frontend-indol.vercel.app'];
+
 const io = new Server(httpServer, {
   cors: {
-    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+    origin: function(origin, callback) {
+      // allow requests with no origin (like mobile apps or curl requests)
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.indexOf(origin) === -1) {
+        const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
+        return callback(new Error(msg), false);
+      }
+      return callback(null, true);
+    },
     methods: ['GET', 'POST'],
     credentials: true
   }
@@ -62,8 +72,6 @@ io.on('connection', (socket) => {
   });
 });
 
-// CORS configuration
-const allowedOrigins = ['http://localhost:3000', 'https://stream-frontend-indol.vercel.app'];
 
 app.use(cors({
   origin: function(origin, callback) {
