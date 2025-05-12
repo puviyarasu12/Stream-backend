@@ -133,7 +133,6 @@ router.get('/profile', auth, async (req, res) => {
 });
 
  
-// New endpoint: Update user profile (username and avatar)
 router.put('/profile', auth, async (req, res) => {
   try {
     const user = await User.findById(req.user.userId);
@@ -142,6 +141,28 @@ router.put('/profile', auth, async (req, res) => {
     // Update username if provided
     if (req.body.username) {
       user.username = req.body.username;
+    }
+
+    // Update bio if provided
+    if (req.body.bio !== undefined) {
+      user.bio = req.body.bio;
+    }
+
+    // Update socialLinks if provided
+    if (req.body.socialLinks) {
+      user.socialLinks.twitter = req.body.socialLinks.twitter || user.socialLinks.twitter;
+      user.socialLinks.facebook = req.body.socialLinks.facebook || user.socialLinks.facebook;
+      user.socialLinks.instagram = req.body.socialLinks.instagram || user.socialLinks.instagram;
+      user.socialLinks.website = req.body.socialLinks.website || user.socialLinks.website;
+      user.socialLinks.linkedin = req.body.socialLinks.linkedin || user.socialLinks.linkedin;
+    }
+
+    // Update preferences if provided
+    if (req.body.preferences) {
+      user.preferences.theme = req.body.preferences.theme || user.preferences.theme;
+      if (typeof req.body.preferences.notifications === 'boolean') {
+        user.preferences.notifications = req.body.preferences.notifications;
+      }
     }
 
     await user.save();
@@ -175,7 +196,7 @@ router.put('/profile', auth, async (req, res) => {
   }
 });
 
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcryptjs');
 
 router.put('/password', auth, async (req, res) => {
   try {
