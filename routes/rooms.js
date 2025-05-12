@@ -366,8 +366,13 @@ router.post('/:roomId/watchlist/:movieId/select', auth, async (req, res) => {
 });
 
 // Get messages for a room
+const mongoose = require('mongoose');
+
 router.get('/:roomId/messages', auth, async (req, res) => {
   try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.roomId)) {
+      return res.status(400).json({ error: 'Invalid room ID' });
+    }
     const messages = await Message.find({ room: req.params.roomId })
       .populate('user', 'username')
       .sort({ timestamp: 1 });
