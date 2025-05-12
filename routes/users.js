@@ -175,7 +175,7 @@ router.put('/profile', auth, async (req, res) => {
   }
 });
 
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcryptjs');
 
 router.put('/password', auth, async (req, res) => {
   try {
