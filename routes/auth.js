@@ -19,32 +19,24 @@ router.post('/register', async (req, res) => {
 
 router.post('/login', async (req, res) => {
   try {
-    console.log('Login request received:', req.body);
     const { email, password } = req.body;
 
     if (!email || !password) {
-      console.log('Missing email or password');
       return res.status(400).json({ error: 'Email and password are required' });
     }
 
     const user = await User.findOne({ email });
     if (!user) {
-      console.log('User not found:', email);
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    console.log('User found, checking password');
     const validPassword = await bcrypt.compare(password, user.password);
     if (!validPassword) {
-      console.log('Invalid password');
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    console.log('Password valid, generating token');
     const jwtSecret = process.env.JWT_SECRET || 'fallback-secret-key-for-development';
-    console.log('Using JWT secret:', jwtSecret ? 'Secret is set' : 'Secret is NOT set');
     const token = jwt.sign({ userId: user._id }, jwtSecret);
-    console.log('Login successful for user:', user.username);
     res.json({ token, userId: user._id, username: user.username });
   } catch (error) {
     console.error('Login error:', error);
