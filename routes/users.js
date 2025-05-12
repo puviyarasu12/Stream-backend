@@ -8,9 +8,9 @@ const fs = require('fs');
 
 // Configure Cloudinary with environment variables
 cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME || 'dtvk8n4h8',
-  api_key: process.env.CLOUDINARY_API_KEY || '861475431651897',
-  api_secret: process.env.CLOUDINARY_API_SECRET || 'mFVUDK2fStLCJk-EDafvgx7eg3A',
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME ,
+  api_key: process.env.CLOUDINARY_API_KEY ,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
 // Get user's watchlist
