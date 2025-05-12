@@ -377,6 +377,7 @@ router.get('/:roomId/messages', auth, async (req, res) => {
       .sort({ timestamp: 1 });
     res.json(messages);
   } catch (error) {
+    console.error('Error fetching messages:', error);
     res.status(500).json({ error: error.message });
   }
 });
