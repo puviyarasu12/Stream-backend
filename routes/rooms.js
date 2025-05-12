@@ -366,7 +366,6 @@ router.post('/:roomId/watchlist/:movieId/select', auth, async (req, res) => {
 });
 
 // Get messages for a room
-const mongoose = require('mongoose');
 
 router.get('/:roomId/messages', auth, async (req, res) => {
   try {
