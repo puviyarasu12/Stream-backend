@@ -14,7 +14,6 @@ const userSchema = new mongoose.Schema({
     website: { type: String, default: '' },
   },
   preferences: {
-    notifications: { type: Boolean, default: true },
     theme: { type: String, default: 'light' },
   },
   badges: [{ type: String }],

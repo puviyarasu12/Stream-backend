@@ -138,7 +138,10 @@ router.get('/search', auth, async (req, res) => {
       }
     }));
 
-    res.json(results.filter(r => r !== null));
+    // Limit results to max 10 items to avoid cutoff issues
+    const limitedResults = results.filter(r => r !== null).slice(0, 10);
+
+    res.json(limitedResults);
   } catch (error) {
     console.error('Search error:', error);
     res.status(500).json({ error: 'Failed to perform search' });
