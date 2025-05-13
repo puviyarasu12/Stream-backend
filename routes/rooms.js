@@ -90,13 +90,19 @@ router.post('/join', auth, async (req, res) => {
       return res.status(403).json({ error: 'You are banned from this room' });
     }
 
+    // Filter out banned users from participants
+    room.participants = room.participants.filter(
+      (participantId) => !room.bannedUsers.includes(participantId.toString())
+    );
+
     if (!room.participants.includes(req.user.userId)) {
       if (room.participants.length >= ((room.settings && room.settings.maxParticipants) || 50)) {
         return res.status(403).json({ error: 'Room has reached maximum participant limit' });
       }
       room.participants.push(req.user.userId);
-      await room.save();
     }
+
+    await room.save();
 
     const populatedRoom = await Room.findById(room._id)
       .populate('creator', 'username')
@@ -133,6 +139,11 @@ router.get('/:roomId', auth, async (req, res) => {
       return res.status(403).json({ error: 'You are banned from this room' });
     }
 
+    // Filter out banned users from participants
+    room.participants = room.participants.filter(
+      (participantId) => !room.bannedUsers.includes(participantId.toString())
+    );
+
     // For private rooms, check if user is a participant
     if (room.isPrivate && !room.participants.includes(req.user.userId)) {
       return res.status(403).json({ error: 'Not authorized to access this room' });
@@ -144,8 +155,9 @@ router.get('/:roomId', auth, async (req, res) => {
         return res.status(403).json({ error: 'Room has reached maximum participant limit' });
       }
       room.participants.push(req.user.userId);
-      await room.save();
     }
+
+    await room.save();
 
     // Populate room data
     const populatedRoom = await Room.findById(room._id)
@@ -243,73 +255,8 @@ router.post('/:roomId/watchlist', auth, async (req, res) => {
   }
 });
 
-// Vote/unvote for a movie
-router.post('/:roomId/watchlist/:movieId/vote', auth, async (req, res) => {
-  try {
-    const room = await Room.findById(req.params.roomId);
-    if (!room) return res.status(404).json({ error: 'Room not found' });
-    if (!room.participants.includes(req.user.userId)) {
-      return res.status(403).json({ error: 'Not a participant' });
-    }
-    const watchlistItem = room.watchlist.find(
-      (item) => item.movie.id === req.params.movieId
-    );
-    if (!watchlistItem) {
-      return res.status(404).json({ error: 'Movie not in watchlist' });
-    }
-    const userVoted = watchlistItem.votes.includes(req.user.userId);
-    if (userVoted) {
-      watchlistItem.votes = watchlistItem.votes.filter(
-        (vote) => vote.toString() !== req.user.userId
-      );
-    } else {
-      watchlistItem.votes.push(req.user.userId);
-    }
-    await room.save();
-    const populatedRoom = await Room.findById(room._id)
-      .populate('creator', 'username')
-      .populate('participants', 'username')
-      .populate('watchlist.addedBy', 'username');
-    res.json(populatedRoom);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
 
 // Select movie from watchlist
-router.post('/:roomId/watchlist/:movieId/select', auth, async (req, res) => {
-  try {
-    const room = await Room.findById(req.params.roomId);
-    if (!room) return res.status(404).json({ error: 'Room not found' });
-    if (room.creator.toString() !== req.user.userId) {
-      return res.status(403).json({ error: 'Only the creator can select a movie' });
-    }
-    const watchlistItem = room.watchlist.find(
-      (item) => item.movie.id === req.params.movieId
-    );
-    if (!watchlistItem) {
-      return res.status(404).json({ error: 'Movie not in watchlist' });
-    }
-    room.movie = {
-      title: watchlistItem.movie.title,
-      url: `https://www.youtube.com/watch?v=${watchlistItem.movie.id}`,
-      thumbnail: watchlistItem.movie.thumbnail,
-      currentTime: 0,
-      isPlaying: true,
-    };
-    room.watchlist = room.watchlist.filter(
-      (item) => item.movie.id !== watchlistItem.movie.id
-    );
-    await room.save();
-    const populatedRoom = await Room.findById(room._id)
-      .populate('creator', 'username')
-      .populate('participants', 'username')
-      .populate('watchlist.addedBy', 'username');
-    res.json(populatedRoom);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
 
 // Get messages for a room
 
@@ -371,43 +318,6 @@ router.post('/:roomId/messages', auth, async (req, res) => {
 });
 
 // Add or remove a reaction to a message
-router.post('/:roomId/messages/:messageId/reactions', auth, async (req, res) => {
-  try {
-    const { emoji } = req.body;
-    if (!emoji) {
-      return res.status(400).json({ error: 'Emoji is required' });
-    }
-
-    const message = await Message.findById(req.params.messageId);
-    if (!message) {
-      return res.status(404).json({ error: 'Message not found' });
-    }
-
-    // Check if user already reacted with this emoji
-    const existingReactionIndex = message.reactions.findIndex(
-      (reaction) =>
-        reaction.emoji === emoji && reaction.user.toString() === req.user.userId
-    );
-
-    if (existingReactionIndex !== -1) {
-      // Remove existing reaction
-      message.reactions.splice(existingReactionIndex, 1);
-    } else {
-      // Add new reaction
-      message.reactions.push({ emoji, user: req.user.userId });
-    }
-
-    await message.save();
-
-    const populatedMessage = await Message.findById(message._id)
-      .populate('user', 'username')
-      .populate('reactions.user', 'username');
-
-    res.json(populatedMessage);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
 
 // Update room settings
 router.patch('/:roomId/settings', auth, async (req, res) => {
@@ -496,6 +406,29 @@ router.get('/:roomId/invite-code', auth, async (req, res) => {
       return res.status(404).json({ error: 'Invite code not found' });
     }
     res.json({ inviteCode: room.inviteCode });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Get a random active room
+ */
+router.get('/random/active', auth, async (req, res) => {
+  try {
+    const count = await Room.countDocuments({ isActive: true });
+    if (count === 0) {
+      return res.status(404).json({ error: 'No active rooms found' });
+    }
+    const random = Math.floor(Math.random() * count);
+    const room = await Room.findOne({ isActive: true }).skip(random)
+      .populate('creator', 'username')
+      .populate('participants', 'username')
+      .populate('watchlist.addedBy', 'username');
+    if (!room) {
+      return res.status(404).json({ error: 'No active rooms found' });
+    }
+    res.json(room);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
