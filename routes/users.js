@@ -68,51 +68,6 @@ router.delete('/watchlist/:movieId', auth, async (req, res) => {
   }
 });
 
-// Vote/unvote for a movie in user's watchlist
-router.post('/watchlist/:movieId/vote', auth, async (req, res) => {
-  try {
-    const user = await User.findById(req.user.userId);
-    if (!user) return res.status(404).json({ error: 'User not found' });
-
-    const watchlistItem = user.watchlist.find(item => item.movie.id === req.params.movieId);
-    if (!watchlistItem) {
-      return res.status(404).json({ error: 'Movie not in watchlist' });
-    }
-
-    const userVoted = watchlistItem.votes.includes(req.user.userId);
-    if (userVoted) {
-      watchlistItem.votes = watchlistItem.votes.filter(vote => vote.toString() !== req.user.userId);
-    } else {
-      watchlistItem.votes.push(req.user.userId);
-    }
-    await user.save();
-    res.json(user.watchlist);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Select movie from user's watchlist (e.g., to play or mark as selected)
-router.post('/watchlist/:movieId/select', auth, async (req, res) => {
-  try {
-    const user = await User.findById(req.user.userId);
-    if (!user) return res.status(404).json({ error: 'User not found' });
-
-    const watchlistItem = user.watchlist.find(item => item.movie.id === req.params.movieId);
-    if (!watchlistItem) {
-      return res.status(404).json({ error: 'Movie not in watchlist' });
-    }
-
-    // For now, just remove the selected movie from watchlist
-    user.watchlist = user.watchlist.filter(item => item.movie.id !== req.params.movieId);
-    await user.save();
-
-    // You can extend this to trigger playing the movie or other actions
-    res.json(user.watchlist);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
 
 // New endpoint: Get user profile
 router.get('/profile', auth, async (req, res) => {
