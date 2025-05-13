@@ -1,7 +1,5 @@
 const express = require('express');
 const router = express.Router();
-
-const triviaRouter = require('./trivia');
 const Room = require('../models/Room');
 const Message = require('../models/Message');
 const auth = require('../middleware/auth');
@@ -11,58 +9,6 @@ const Trivia = require('../models/Trivia');
 const User = require('../models/User');
 
 const mongoose = require('mongoose');
-
-// Room-specific trivia routes
-
-// Get trivia questions for a room
-router.get('/:roomId/trivia', auth, async (req, res) => {
-  try {
-    const trivia = await Trivia.find({ room: req.params.roomId })
-      .populate('createdBy', 'username')
-      .sort({ timestamp: 1 });
-    res.json(trivia);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Create a new trivia question for a room
-router.post('/:roomId/trivia', auth, async (req, res) => {
-  try {
-    const { question, options, correctAnswer, timestamp, category, movie } = req.body;
-    const trivia = new Trivia({
-      question,
-      options,
-      correctAnswer,
-      timestamp,
-      category,
-      movie,
-      createdBy: req.user.userId,
-      room: req.params.roomId,
-    });
-    await trivia.save();
-    const populatedTrivia = await Trivia.findById(trivia._id)
-      .populate('createdBy', 'username');
-    res.status(201).json(populatedTrivia);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Submit an answer for a trivia question in a room
-router.post('/:roomId/trivia/:triviaId/answer', auth, async (req, res) => {
-  try {
-    const { answer } = req.body;
-    const trivia = await Trivia.findOne({ _id: req.params.triviaId, room: req.params.roomId });
-    if (!trivia) {
-      return res.status(404).json({ error: 'Trivia not found' });
-    }
-    const isCorrect = answer === trivia.correctAnswer;
-    res.json({ isCorrect });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
 
 // Create a new room
 router.post('/', auth, async (req, res) => {
@@ -419,6 +365,45 @@ router.post('/:roomId/messages', auth, async (req, res) => {
       'username'
     );
     res.status(201).json(populatedMessage);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Add or remove a reaction to a message
+router.post('/:roomId/messages/:messageId/reactions', auth, async (req, res) => {
+  try {
+    const { emoji } = req.body;
+    if (!emoji) {
+      return res.status(400).json({ error: 'Emoji is required' });
+    }
+
+    const message = await Message.findById(req.params.messageId);
+    if (!message) {
+      return res.status(404).json({ error: 'Message not found' });
+    }
+
+    // Check if user already reacted with this emoji
+    const existingReactionIndex = message.reactions.findIndex(
+      (reaction) =>
+        reaction.emoji === emoji && reaction.user.toString() === req.user.userId
+    );
+
+    if (existingReactionIndex !== -1) {
+      // Remove existing reaction
+      message.reactions.splice(existingReactionIndex, 1);
+    } else {
+      // Add new reaction
+      message.reactions.push({ emoji, user: req.user.userId });
+    }
+
+    await message.save();
+
+    const populatedMessage = await Message.findById(message._id)
+      .populate('user', 'username')
+      .populate('reactions.user', 'username');
+
+    res.json(populatedMessage);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
