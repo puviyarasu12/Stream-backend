@@ -15,7 +15,7 @@ const app = express();
 const httpServer = createServer(app);
 
 // Configure Socket.IO with CORS
-const allowedOrigins = ['http://localhost:3000', 'https://stream-frontend-git-main-puvis-projects-1593e6f5.vercel.app/'];
+const allowedOrigins = ['http://localhost:3000', 'https://stream-frontend-git-main-puvis-projects-1593e6f5.vercel.app'];
 
 const io = new Server(httpServer, {
   cors: {
