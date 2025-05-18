@@ -2,9 +2,28 @@ const express = require('express');
 const router = express.Router();
 const axios = require('axios');
 const auth = require('../middleware/auth');
+const rateLimit = require('express-rate-limit'); // For rate limiting
+const { query, body, validationResult } = require('express-validator'); // Updated express-validator import
+const createError = require('http-errors'); // For consistent error handling
 
-const OMDB_API_KEY = process.env.OMDB_API_KEY;
+// Environment variable validation
+const OMDB_API_KEY = process.env.OMDB_API_KEY || (() => { throw new Error('OMDB_API_KEY is not set'); })();
 const OMDB_BASE_URL = 'https://www.omdbapi.com/';
+
+// Rate limiting middleware to prevent abuse
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // Limit each IP to 100 requests per window
+  message: { error: 'Too many requests, please try again later.' },
+});
+
+// Apply rate limiting to all routes
+router.use(apiLimiter);
+
+// Configure axios with timeout
+const axiosInstance = axios.create({
+  timeout: 10000, // 10-second timeout for all requests
+});
 
 // Helper function to check if movie is appropriate (for random movie generator)
 const isAppropriateContent = (movieDetails) => {
@@ -15,8 +34,33 @@ const isAppropriateContent = (movieDetails) => {
   return !inappropriateRatings.includes(movieDetails.Rated);
 };
 
+// Input sanitization and validation middleware for query parameters
+const sanitizeQuery = [
+  query('query').trim().escape().notEmpty().withMessage('Query is required'),
+  query('type').optional().trim().toLowerCase().isIn(['movie', 'series', '']).withMessage('Type must be movie or series'),
+  (req, res, next) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ error: errors.array()[0].msg });
+    }
+    next();
+  },
+];
+
+// Input sanitization and validation middleware for body
+const sanitizeBody = [
+  body('movieName').trim().escape().notEmpty().withMessage('Movie name is required'),
+  (req, res, next) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ error: errors.array()[0].msg });
+    }
+    next();
+  },
+];
+
 // Get random movie - MUST be before :imdbId route to prevent conflict
-router.get('/random/movie', auth, async (req, res) => {
+router.get('/random/movie', auth, apiLimiter, async (req, res, next) => {
   try {
     const currentYear = new Date().getFullYear();
     const randomYear = Math.floor(Math.random() * (currentYear - 1970 + 1)) + 1970;
@@ -28,7 +72,7 @@ router.get('/random/movie', auth, async (req, res) => {
     let movie;
 
     while (!appropriateMovieFound && attempts < 5) {
-      const response = await axios.get(OMDB_BASE_URL, {
+      const response = await axiosInstance.get(OMDB_BASE_URL, {
         params: {
           apikey: OMDB_API_KEY,
           s: randomTerm,
@@ -49,7 +93,7 @@ router.get('/random/movie', auth, async (req, res) => {
 
       const randomMovie = movies[Math.floor(Math.random() * movies.length)];
       
-      const detailsResponse = await axios.get(OMDB_BASE_URL, {
+      const detailsResponse = await axiosInstance.get(OMDB_BASE_URL, {
         params: {
           apikey: OMDB_API_KEY,
           i: randomMovie.imdbID,
@@ -83,12 +127,12 @@ router.get('/random/movie', auth, async (req, res) => {
     res.json(movie);
   } catch (error) {
     console.error('Random movie error:', error);
-    res.status(500).json({ error: 'Failed to get random movie. Please try again.' });
+    next(createError(500, 'Failed to get random movie. Please try again.'));
   }
 });
 
 // Search movies and series - with optional type filtering
-router.get('/search', auth, async (req, res) => {
+router.get('/search', auth, apiLimiter, sanitizeQuery, async (req, res, next) => {
   try {
     const { query, type } = req.query;
 
@@ -108,7 +152,7 @@ router.get('/search', auth, async (req, res) => {
       params.type = omdbType;
     }
 
-    const response = await axios.get(OMDB_BASE_URL, { params });
+    const response = await axiosInstance.get(OMDB_BASE_URL, { params });
 
     if (response.data.Error) {
       return res.status(404).json({ error: response.data.Error });
@@ -116,7 +160,7 @@ router.get('/search', auth, async (req, res) => {
 
     // Get details for each item but don't filter based on rating
     const results = await Promise.all(response.data.Search.map(async (item) => {
-      const detailsResponse = await axios.get(OMDB_BASE_URL, {
+      const detailsResponse = await axiosInstance.get(OMDB_BASE_URL, {
         params: {
           apikey: OMDB_API_KEY,
           i: item.imdbID,
@@ -144,14 +188,19 @@ router.get('/search', auth, async (req, res) => {
     res.json(limitedResults);
   } catch (error) {
     console.error('Search error:', error);
-    res.status(500).json({ error: 'Failed to perform search' });
+    next(createError(500, 'Failed to perform search'));
   }
 });
 
 // Get movie details - MUST be after other specific routes
-router.get('/:imdbId', auth, async (req, res) => {
+router.get('/:imdbId', auth, apiLimiter, async (req, res, next) => {
   try {
-    const response = await axios.get(OMDB_BASE_URL, {
+    // Validate IMDb ID format
+    if (!req.params.imdbId.match(/^tt\d{7,8}$/)) {
+      return res.status(400).json({ error: 'Invalid IMDb ID format' });
+    }
+
+    const response = await axiosInstance.get(OMDB_BASE_URL, {
       params: {
         apikey: OMDB_API_KEY,
         i: req.params.imdbId,
@@ -180,8 +229,64 @@ router.get('/:imdbId', auth, async (req, res) => {
     res.json(movie);
   } catch (error) {
     console.error('Movie details error:', error);
-    res.status(500).json({ error: 'Failed to get movie details' });
+    next(createError(500, 'Failed to get movie details'));
   }
+});
+
+
+router.post('/summary', auth, apiLimiter, async (req, res, next) => {
+  const { question } = req.body;
+
+  if (!question || question.trim() === '') {
+    return res.status(400).json({ error: 'Question is required' });
+  }
+
+  try {
+    const prompt = `You are a movie expert AI assistant. Provide extremely detailed, informative, and comprehensive answers to questions related to movies, movie-related people (actors, directors, producers), and the movie industry. Elaborate extensively, include as much relevant information as possible, and provide insightful context and background. Structure your response clearly with paragraphs and sections if needed. Do not include images or URLs. If the question is unrelated, respond politely that you only answer movie-related questions.\n\nUser question: ${question}`;
+    
+    const cohereResponse = await axiosInstance.post(
+      'https://api.cohere.ai/v1/chat',
+      {
+        model: 'command-r',
+        message: prompt,
+        max_tokens: 4096,
+        temperature: 0.7
+      },
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer NfV6q56ZEvQSVeUJKyLJw5OqlJ8UiQR7tv3BY5ti`,
+        },
+      }
+    );
+
+    let aiAnswer = cohereResponse.data?.text || 'Answer not available.';
+
+    // Remove image URLs extraction and base64 conversion to avoid images in the answer
+    // Just return the AI answer text as is without modification
+    // aiAnswer remains unchanged
+
+    return res.json({ answer: aiAnswer });
+  } catch (error) {
+    if (error.response) {
+      console.error('Cohere API error response:', error.response.status, error.response.data);
+    } else if (error.request) {
+      console.error('Cohere API no response received:', error.request);
+    } else {
+      console.error('Error setting up Cohere API request:', error.message);
+    }
+    next(createError(500, 'Failed to generate answer'));
+  }
+});
+
+
+
+// Error handling middleware
+router.use((err, req, res, next) => {
+  res.status(err.status || 500).json({
+    error: err.message || 'Internal Server Error',
+    status: err.status || 500,
+  });
 });
 
 module.exports = router;
