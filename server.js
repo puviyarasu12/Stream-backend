@@ -53,12 +53,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('poll-update', ({ roomId, poll }) => {
-    io.to(roomId).emit('poll-update', poll);
-    if (process.env.NODE_ENV !== 'production') {
-      console.log(`Poll updated in room: ${roomId}`);
-    }
-  });
+
 
   socket.on('new-trivia', ({ roomId, trivia }) => {
     io.to(roomId).emit('new-trivia', trivia);
@@ -120,6 +115,7 @@ app.use(fileUpload({
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/rooms', roomsRoutes);
+app.use(express.json())
 app.use('/api/movies', moviesRoutes);
 app.use('/api/trivia', triviaRoutes);
 app.use('/api/users', usersRoutes);
