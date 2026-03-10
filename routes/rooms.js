@@ -7,8 +7,11 @@ const { customAlphabet } = require('nanoid');
 const nanoid = customAlphabet('1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ', 6);
 const Trivia = require('../models/Trivia');
 const User = require('../models/User');
-
 const mongoose = require('mongoose');
+
+// io is attached to app in server.js — access it here for socket broadcasts
+// Make sure in your server.js you do: app.set('io', io);
+const getIo = (req) => req.app.get('io');
 
 // Create a new room
 router.post('/', auth, async (req, res) => {
@@ -108,6 +111,7 @@ router.post('/join', auth, async (req, res) => {
       .populate('creator', 'username')
       .populate('participants', 'username')
       .populate('watchlist.addedBy', 'username');
+
     res.json(populatedRoom);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -150,7 +154,7 @@ router.get('/:roomId', auth, async (req, res) => {
     }
 
     // Check participant limit before adding new participant
-    if (!room.participants.includes(req.user.userId)) {
+    if (!room.participants.map(String).includes(req.user.userId)) {
       if (room.participants.length >= ((room.settings && room.settings.maxParticipants) || 50)) {
         return res.status(403).json({ error: 'Room has reached maximum participant limit' });
       }
@@ -159,7 +163,6 @@ router.get('/:roomId', auth, async (req, res) => {
 
     await room.save();
 
-    // Populate room data
     const populatedRoom = await Room.findById(room._id)
       .populate('creator', 'username')
       .populate('participants', 'username')
@@ -171,12 +174,13 @@ router.get('/:roomId', auth, async (req, res) => {
   }
 });
 
-// Update movie state
+// Update movie state — also broadcasts via socket so all users sync in real time
 router.patch('/:roomId/movie', auth, async (req, res) => {
   try {
     const room = await Room.findById(req.params.roomId);
     if (!room) return res.status(404).json({ error: 'Room not found' });
-    if (!room.participants.includes(req.user.userId)) {
+
+    if (!room.participants.map(String).includes(req.user.userId)) {
       return res.status(403).json({ error: 'Not a participant' });
     }
 
@@ -197,7 +201,7 @@ router.patch('/:roomId/movie', auth, async (req, res) => {
       timestamp: new Date(),
     });
 
-    // If there's a significant sync difference, track it
+    // Track significant sync differences
     if (room.movie && Math.abs(room.movie.currentTime - req.body.currentTime) > 2) {
       room.syncEvents.push({
         userId: req.user.userId,
@@ -213,6 +217,21 @@ router.patch('/:roomId/movie', auth, async (req, res) => {
     };
 
     await room.save();
+
+    // FIX: Broadcast updated video state to ALL other users in the room via socket.
+    // This ensures pause/play/seek from one user is reflected for everyone instantly.
+    const io = getIo(req);
+    if (io) {
+      const videoState = {
+        currentTime: req.body.currentTime,
+        isPlaying: req.body.isPlaying,
+        title: req.body.title,
+        url: req.body.url,
+        timestamp: req.body.timestamp || Date.now(),
+      };
+      // Broadcast to everyone in the room EXCEPT the sender
+      io.to(req.params.roomId).except(req.body.socketId).emit('video-sync', videoState);
+    }
 
     const populatedRoom = await Room.findById(room._id)
       .populate('creator', 'username')
@@ -231,7 +250,7 @@ router.post('/:roomId/watchlist', auth, async (req, res) => {
     const { movie } = req.body;
     const room = await Room.findById(req.params.roomId);
     if (!room) return res.status(404).json({ error: 'Room not found' });
-    if (!room.participants.includes(req.user.userId)) {
+    if (!room.participants.map(String).includes(req.user.userId)) {
       return res.status(403).json({ error: 'Not a participant' });
     }
     room.watchlist.push({
@@ -255,11 +274,7 @@ router.post('/:roomId/watchlist', auth, async (req, res) => {
   }
 });
 
-
-// Select movie from watchlist
-
 // Get messages for a room
-
 router.get('/:roomId/messages', auth, async (req, res) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(req.params.roomId)) {
@@ -271,12 +286,10 @@ router.get('/:roomId/messages', auth, async (req, res) => {
 
     let query = { room: req.params.roomId };
     if (before) {
-      // If before is a valid ISO date string, use timestamp filter
       const beforeDate = new Date(before);
       if (!isNaN(beforeDate.getTime())) {
         query.timestamp = { $lt: beforeDate };
       } else if (mongoose.Types.ObjectId.isValid(before)) {
-        // If before is a valid ObjectId, find message with that ID to get timestamp
         const beforeMessage = await Message.findById(before);
         if (beforeMessage) {
           query.timestamp = { $lt: beforeMessage.timestamp };
@@ -289,7 +302,6 @@ router.get('/:roomId/messages', auth, async (req, res) => {
       .sort({ timestamp: -1 })
       .limit(limit);
 
-    // Return messages sorted ascending for display
     res.json(messages.reverse());
   } catch (error) {
     console.error('Error fetching messages:', error);
@@ -307,17 +319,12 @@ router.post('/:roomId/messages', auth, async (req, res) => {
       content,
     });
     await message.save();
-    const populatedMessage = await Message.findById(message._id).populate(
-      'user',
-      'username'
-    );
+    const populatedMessage = await Message.findById(message._id).populate('user', 'username');
     res.status(201).json(populatedMessage);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
-
-// Add or remove a reaction to a message
 
 // Update room settings
 router.patch('/:roomId/settings', auth, async (req, res) => {
@@ -347,15 +354,26 @@ router.patch('/:roomId/settings', auth, async (req, res) => {
 
     room.settings = { ...room.settings, ...settings };
 
-    // If videoLink is updated, also update room.movie.url
+    // If videoLink is updated, also update room.movie.url and broadcast
     if (settings.videoLink !== undefined) {
       room.movie = room.movie || {};
       room.movie.url = settings.videoLink;
-      // Optionally reset other movie fields if needed
       room.movie.title = 'Custom Video';
       room.movie.currentTime = 0;
       room.movie.isPlaying = false;
       room.movie.lastUpdated = new Date();
+
+      // Broadcast new video URL to all users in the room
+      const io = getIo(req);
+      if (io) {
+        io.to(req.params.roomId).emit('video-sync', {
+          url: settings.videoLink,
+          title: 'Custom Video',
+          currentTime: 0,
+          isPlaying: false,
+          timestamp: Date.now(),
+        });
+      }
     }
 
     await room.save();
@@ -386,6 +404,13 @@ router.delete('/:roomId', auth, async (req, res) => {
     // Mark room as inactive instead of deleting for safety
     room.isActive = false;
     await room.save();
+
+    // Notify all users in the room that it has been deleted
+    const io = getIo(req);
+    if (io) {
+      io.to(req.params.roomId).emit('room-deleted', { roomId: req.params.roomId });
+    }
+
     res.json({ message: 'Room deleted successfully' });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -411,9 +436,7 @@ router.get('/:roomId/invite-code', auth, async (req, res) => {
   }
 });
 
-/**
- * Get a random active room
- */
+// Get a random active room
 router.get('/random/active', auth, async (req, res) => {
   try {
     const count = await Room.countDocuments({ isActive: true });
@@ -421,7 +444,8 @@ router.get('/random/active', auth, async (req, res) => {
       return res.status(404).json({ error: 'No active rooms found' });
     }
     const random = Math.floor(Math.random() * count);
-    const room = await Room.findOne({ isActive: true }).skip(random)
+    const room = await Room.findOne({ isActive: true })
+      .skip(random)
       .populate('creator', 'username')
       .populate('participants', 'username')
       .populate('watchlist.addedBy', 'username');
