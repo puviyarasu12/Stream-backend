@@ -15,12 +15,16 @@ const app = express();
 const httpServer = createServer(app);
 
 // Configure Socket.IO with CORS
-const allowedOrigins = ['http://localhost:3000', 'https://stream-frontend-git-main-puvis-projects-1593e6f5.vercel.app','https://stream-frontend-ivory.vercel.app','https://stream-frontend-puvis-projects-1593e6f5.vercel.app'];
+const allowedOrigins = [
+  'http://localhost:3000',
+  'https://stream-frontend-git-main-puvis-projects-1593e6f5.vercel.app',
+  'https://stream-frontend-ivory.vercel.app',
+  'https://stream-frontend-puvis-projects-1593e6f5.vercel.app',
+];
 
 const io = new Server(httpServer, {
   cors: {
-    origin: function(origin, callback) {
-      // allow requests with no origin (like mobile apps or curl requests)
+    origin: function (origin, callback) {
       if (!origin) return callback(null, true);
       if (allowedOrigins.indexOf(origin) === -1) {
         const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
@@ -29,43 +33,47 @@ const io = new Server(httpServer, {
       return callback(null, true);
     },
     methods: ['GET', 'POST'],
-    credentials: true
-  }
+    credentials: true,
+  },
 });
+
+// FIX: Attach io to app so route handlers can broadcast video-sync events
+// Usage in routes: const io = req.app.get('io');
+app.set('io', io);
 
 // Socket.IO event handlers
 io.on('connection', (socket) => {
   if (process.env.NODE_ENV !== 'production') {
-    console.log('Client connected');
+    console.log('Client connected:', socket.id);
   }
 
   socket.on('join-room', (roomId) => {
     socket.join(roomId);
     if (process.env.NODE_ENV !== 'production') {
-      console.log(`Client joined room: ${roomId}`);
+      console.log(`Client ${socket.id} joined room: ${roomId}`);
     }
   });
 
   socket.on('leave-room', (roomId) => {
     socket.leave(roomId);
     if (process.env.NODE_ENV !== 'production') {
-      console.log(`Client left room: ${roomId}`);
+      console.log(`Client ${socket.id} left room: ${roomId}`);
     }
   });
 
-
+  // FIX: Client emits video-sync for fast peer-to-peer sync (no DB round-trip).
+  // Server relays to all OTHER users in the room only (excludes sender).
+  socket.on('video-sync', ({ roomId, videoState }) => {
+    socket.to(roomId).emit('video-sync', videoState);
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`Video sync in room ${roomId}: playing=${videoState.isPlaying} time=${videoState.currentTime}`);
+    }
+  });
 
   socket.on('new-trivia', ({ roomId, trivia }) => {
     io.to(roomId).emit('new-trivia', trivia);
     if (process.env.NODE_ENV !== 'production') {
       console.log(`New trivia in room: ${roomId}`);
-    }
-  });
-
-  socket.on('video-sync', ({ roomId, videoState }) => {
-    socket.to(roomId).emit('video-sync', videoState);
-    if (process.env.NODE_ENV !== 'production') {
-      console.log(`Video sync in room: ${roomId}`);
     }
   });
 
@@ -78,26 +86,26 @@ io.on('connection', (socket) => {
 
   socket.on('disconnect', () => {
     if (process.env.NODE_ENV !== 'production') {
-      console.log('Client disconnected');
+      console.log('Client disconnected:', socket.id);
     }
   });
 });
 
-
-app.use(cors({
-  origin: function(origin, callback) {
-    // allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.indexOf(origin) === -1) {
-      const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
-      return callback(new Error(msg), false);
-    }
-    return callback(null, true);
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
+app.use(
+  cors({
+    origin: function (origin, callback) {
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.indexOf(origin) === -1) {
+        const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
+        return callback(new Error(msg), false);
+      }
+      return callback(null, true);
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+  })
+);
 
 // Handle pre-flight requests
 app.options('*', cors());
@@ -105,21 +113,21 @@ app.options('*', cors());
 // Middleware
 app.use(express.json());
 
-// Add express-fileupload middleware
-app.use(fileUpload({
-  useTempFiles: true,
-  tempFileDir: '/tmp/',
-  createParentPath: true,
-}));
+// File upload middleware
+app.use(
+  fileUpload({
+    useTempFiles: true,
+    tempFileDir: '/tmp/',
+    createParentPath: true,
+  })
+);
 
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/rooms', roomsRoutes);
-app.use(express.json())
 app.use('/api/movies', moviesRoutes);
 app.use('/api/trivia', triviaRoutes);
 app.use('/api/users', usersRoutes);
-/* Removed undefined uploadRoutes usage since user routes handle uploads */
 
 // Debug route
 app.get('/api/debug', (req, res) => {
@@ -135,12 +143,13 @@ app.use((err, req, res, next) => {
 // MongoDB connection
 const mongoURI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/movie-stream-room';
 
-mongoose.connect(mongoURI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true
-})
+mongoose
+  .connect(mongoURI, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+  })
   .then(() => console.log('Connected to MongoDB'))
-  .catch(err => {
+  .catch((err) => {
     console.error('MongoDB connection error:', err);
     console.log('Continuing without MongoDB connection...');
   });
