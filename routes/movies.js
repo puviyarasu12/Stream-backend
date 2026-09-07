@@ -47,17 +47,6 @@ const sanitizeQuery = [
   },
 ];
 
-// Input sanitization and validation middleware for body
-const sanitizeBody = [
-  body('movieName').trim().escape().notEmpty().withMessage('Movie name is required'),
-  (req, res, next) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ error: errors.array()[0].msg });
-    }
-    next();
-  },
-];
 
 // Get random movie - MUST be before :imdbId route to prevent conflict
 router.get('/random/movie', auth, apiLimiter, async (req, res, next) => {
