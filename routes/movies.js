@@ -1,7 +1,6 @@
 const express = require('express');
 const router = express.Router();
 const axios = require('axios');
-const OpenAI = require('openai');
 const auth = require('../middleware/auth');
 const rateLimit = require('express-rate-limit'); // For rate limiting
 const { query, body, validationResult } = require('express-validator'); // Updated express-validator import
@@ -9,8 +8,8 @@ const createError = require('http-errors'); // For consistent error handling
 
 // Environment variable validation
 const OMDB_API_KEY = process.env.OMDB_API_KEY || (() => { throw new Error('OMDB_API_KEY is not set'); })();
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+const GROQ_API_KEY = process.env.GROQ_API_KEY;
+const GROQ_MODEL = process.env.GROQ_MODEL || 'qwen/qwen3.8-27b';
 const OMDB_BASE_URL = 'https://www.omdbapi.com/';
 
 // Rate limiting middleware to prevent abuse
@@ -246,27 +245,33 @@ router.post('/summary', auth, apiLimiter, async (req, res, next) => {
     return res.status(400).json({ error: 'Question is required' });
   }
 
-  if (!OPENAI_API_KEY) {
-    console.error('OPENAI_API_KEY is not configured');
+  if (!GROQ_API_KEY) {
+    console.error('GROQ_API_KEY is not configured');
     return res.status(503).json({ error: 'Movie summary service is not configured' });
   }
 
   try {
-    const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
-    const completion = await openai.chat.completions.create({
-      model: OPENAI_MODEL,
-      messages: [
-        {
-          role: 'system',
-          content: 'You are a movie expert AI assistant. Answer only questions related to movies, movie-related people, and the movie industry. Be informative and structure longer answers clearly. Do not invent facts or include images.',
+    const prompt = 'You are a movie expert AI assistant. Answer only questions related to movies, movie-related people, and the movie industry. Be informative and structure longer answers clearly. Do not invent facts or include images.';
+    const groqResponse = await axiosInstance.post(
+      'https://api.groq.com/openai/v1/chat/completions',
+      {
+        model: GROQ_MODEL,
+        messages: [
+          { role: 'system', content: prompt },
+          { role: 'user', content: question },
+        ],
+        max_tokens: 4096,
+        temperature: 0.7,
+      },
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${GROQ_API_KEY}`,
         },
-        { role: 'user', content: question },
-      ],
-      max_tokens: 4096,
-      temperature: 0.7,
-    });
+      }
+    );
 
-    const aiAnswer = completion.choices[0]?.message?.content || 'Answer not available.';
+    const aiAnswer = groqResponse.data?.choices?.[0]?.message?.content || 'Answer not available.';
 
     // Remove image URLs extraction and base64 conversion to avoid images in the answer
     // Just return the AI answer text as is without modification
@@ -274,9 +279,16 @@ router.post('/summary', auth, apiLimiter, async (req, res, next) => {
 
     return res.json({ answer: aiAnswer });
   } catch (error) {
-    if (error.status) {
-      console.error('OpenAI API error:', error.status, error.message);
-      return next(createError(502, 'Movie summary provider failed'));
+    if (error.response) {
+      const providerStatus = error.response.status;
+      console.error('Groq API error:', providerStatus, error.response.data?.error?.message || 'request failed');
+      return res.status(providerStatus === 401 || providerStatus === 429 ? providerStatus : 502).json({
+        error: providerStatus === 401
+          ? 'Movie summary provider rejected the API key'
+          : providerStatus === 429
+            ? 'Movie summary provider rate limit or quota exceeded'
+            : 'Movie summary provider failed',
+      });
     } else {
       console.error('Error generating movie summary:', error.message);
     }
