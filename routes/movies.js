@@ -231,7 +231,7 @@ router.post('/summary', auth, apiLimiter, async (req, res, next) => {
   }
 
   try {
-    const prompt = `You are a movie expert AI assistant. Provide extremely detailed, informative, and comprehensive answers to questions related to movies, movie-related people (actors, directors, producers), and the movie industry. Elaborate extensively, include as much relevant information as possible, and provide insightful context and background. Structure your response clearly with paragraphs and sections if needed. Do not include images or URLs. If the question is unrelated, respond politely that you only answer movie-related questions.\n\nUser question: ${question}`;
+    const prompt = `You are a movie expert AI assistant. Provide extremely detailed, informative, and comprehensive answers to questions related to movies, movie-related people (actors, directors, producers), and the movie industry. Elaborate extensively, include as much relevant information as possible, and provide insightful context and background. Structure your response clearly with paragraphs and sections if needed. Do include images or URLs. If the question is unrelated, respond politely that you only answer movie-related questions.\n\nUser question: ${question}`;
     
     const cohereResponse = await axiosInstance.post(
       'https://api.cohere.ai/v1/chat',
