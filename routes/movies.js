@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const axios = require('axios');
+const OpenAI = require('openai');
 const auth = require('../middleware/auth');
 const rateLimit = require('express-rate-limit'); // For rate limiting
 const { query, body, validationResult } = require('express-validator'); // Updated express-validator import
@@ -8,6 +9,8 @@ const createError = require('http-errors'); // For consistent error handling
 
 // Environment variable validation
 const OMDB_API_KEY = process.env.OMDB_API_KEY || (() => { throw new Error('OMDB_API_KEY is not set'); })();
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
 const OMDB_BASE_URL = 'https://www.omdbapi.com/';
 
 // Rate limiting middleware to prevent abuse
@@ -47,6 +50,17 @@ const sanitizeQuery = [
   },
 ];
 
+// Input sanitization and validation middleware for body
+const sanitizeBody = [
+  body('movieName').trim().escape().notEmpty().withMessage('Movie name is required'),
+  (req, res, next) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ error: errors.array()[0].msg });
+    }
+    next();
+  },
+];
 
 // Get random movie - MUST be before :imdbId route to prevent conflict
 router.get('/random/movie', auth, apiLimiter, async (req, res, next) => {
@@ -75,10 +89,12 @@ router.get('/random/movie', auth, apiLimiter, async (req, res, next) => {
         return res.status(404).json({ error: 'No movies found. Please try again.' });
       }
 
+
       const movies = response.data.Search;
       if (!movies || movies.length === 0) {
         return res.status(404).json({ error: 'No movies found. Please try again.' });
       }
+      
 
       const randomMovie = movies[Math.floor(Math.random() * movies.length)];
       
@@ -121,7 +137,7 @@ router.get('/random/movie', auth, apiLimiter, async (req, res, next) => {
 });
 
 // Search movies and series - with optional type filtering
-router.get('/search', auth, apiLimiter, sanitizeQuery, async (req, res, next) => {
+router.get('/search', auth, sanitizeQuery, async (req, res, next) => {
   try {
     const { query, type } = req.query;
 
@@ -230,26 +246,27 @@ router.post('/summary', auth, apiLimiter, async (req, res, next) => {
     return res.status(400).json({ error: 'Question is required' });
   }
 
-  try {
-    const prompt = `You are a movie expert AI assistant. Provide extremely detailed, informative, and comprehensive answers to questions related to movies, movie-related people (actors, directors, producers), and the movie industry. Elaborate extensively, include as much relevant information as possible, and provide insightful context and background. Structure your response clearly with paragraphs and sections if needed. Do include images or URLs. If the question is unrelated, respond politely that you only answer movie-related questions.\n\nUser question: ${question}`;
-    
-    const cohereResponse = await axiosInstance.post(
-      'https://api.cohere.ai/v1/chat',
-      {
-        model: 'command-r',
-        message: prompt,
-        max_tokens: 4096,
-        temperature: 0.7
-      },
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer NfV6q56ZEvQSVeUJKyLJw5OqlJ8UiQR7tv3BY5ti`,
-        },
-      }
-    );
+  if (!OPENAI_API_KEY) {
+    console.error('OPENAI_API_KEY is not configured');
+    return res.status(503).json({ error: 'Movie summary service is not configured' });
+  }
 
-    let aiAnswer = cohereResponse.data?.text || 'Answer not available.';
+  try {
+    const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
+    const completion = await openai.chat.completions.create({
+      model: OPENAI_MODEL,
+      messages: [
+        {
+          role: 'system',
+          content: 'You are a movie expert AI assistant. Answer only questions related to movies, movie-related people, and the movie industry. Be informative and structure longer answers clearly. Do not invent facts or include images.',
+        },
+        { role: 'user', content: question },
+      ],
+      max_tokens: 4096,
+      temperature: 0.7,
+    });
+
+    const aiAnswer = completion.choices[0]?.message?.content || 'Answer not available.';
 
     // Remove image URLs extraction and base64 conversion to avoid images in the answer
     // Just return the AI answer text as is without modification
@@ -257,12 +274,11 @@ router.post('/summary', auth, apiLimiter, async (req, res, next) => {
 
     return res.json({ answer: aiAnswer });
   } catch (error) {
-    if (error.response) {
-      console.error('Cohere API error response:', error.response.status, error.response.data);
-    } else if (error.request) {
-      console.error('Cohere API no response received:', error.request);
+    if (error.status) {
+      console.error('OpenAI API error:', error.status, error.message);
+      return next(createError(502, 'Movie summary provider failed'));
     } else {
-      console.error('Error setting up Cohere API request:', error.message);
+      console.error('Error generating movie summary:', error.message);
     }
     next(createError(500, 'Failed to generate answer'));
   }
