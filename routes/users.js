@@ -3,8 +3,7 @@ const router = express.Router();
 const User = require('../models/User');
 const auth = require('../middleware/auth');
 const cloudinary = require('cloudinary').v2;
-const path = require('path');
-const fs = require('fs');
+
 
 // Configure Cloudinary with environment variables
 cloudinary.config({
@@ -57,7 +56,7 @@ router.post('/watchlist', auth, async (req, res) => {
 // Remove movie from user's watchlist
 router.delete('/watchlist/:movieId', auth, async (req, res) => {
   try {
-    const user = await User.findById(req.user.userId);
+    const user = await User.findById(req.user.userId); 
     if (!user) return res.status(404).json({ error: 'User not found' });
 
     user.watchlist = user.watchlist.filter(item => item.movie.id !== req.params.movieId);

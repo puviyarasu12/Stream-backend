@@ -1,16 +1,17 @@
 const express = require('express');
 const router = express.Router();
 const axios = require('axios');
-const OpenAI = require('openai');
 const auth = require('../middleware/auth');
 const rateLimit = require('express-rate-limit'); // For rate limiting
 const { query, body, validationResult } = require('express-validator'); // Updated express-validator import
 const createError = require('http-errors'); // For consistent error handling
+const jwt = require('jsonwebtoken');
+const { generateMovieInsight } = require('../services/aiInsightService');
 
 // Environment variable validation
 const OMDB_API_KEY = process.env.OMDB_API_KEY || (() => { throw new Error('OMDB_API_KEY is not set'); })();
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+const GROQ_API_KEY = process.env.GROQ_API_KEY;
+const GROQ_MODEL = process.env.GROQ_MODEL || 'qwen/qwen3.8-27b';
 const OMDB_BASE_URL = 'https://www.omdbapi.com/';
 
 // Rate limiting middleware to prevent abuse
@@ -197,6 +198,89 @@ router.get('/search', auth, sanitizeQuery, async (req, res, next) => {
   }
 });
 
+// Permissive auth for summary: attach user if token present, but never block guests
+const permissiveAuth = (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    try {
+      const token = authHeader.split(' ')[1];
+      const jwtSecret = process.env.JWT_SECRET;
+      if (jwtSecret) {
+        req.user = jwt.verify(token, jwtSecret);
+      }
+    } catch (e) {
+      // Ignore token parse failure for permissive route
+    }
+  }
+  next();
+};
+
+// =============================================================================
+// AI MovieInsight Summary Routes (Placed BEFORE :imdbId to prevent route conflict)
+// =============================================================================
+
+// GET /api/movies/summary — Used by MovieSearch modal: ?title=...
+router.get('/summary', permissiveAuth, apiLimiter, async (req, res, next) => {
+  const query = req.query.title || req.query.question || req.query.movieName || req.query.q;
+
+  if (!query || query.trim() === '') {
+    return res.status(400).json({ error: 'Movie title or question is required' });
+  }
+
+  try {
+    const result = await generateMovieInsight({
+      query: query.trim(),
+      omdbApiKey: OMDB_API_KEY,
+      groqApiKey: GROQ_API_KEY,
+      groqModel: GROQ_MODEL,
+    });
+
+    return res.json({
+      answer: result.answer,
+      summary: result.summary,
+      source: result.source,
+      title: result.title,
+      year: result.year,
+      rating: result.rating,
+      poster: result.poster,
+    });
+  } catch (error) {
+    console.error('Error generating movie insight (GET):', error.message);
+    next(createError(500, 'Failed to generate movie insight'));
+  }
+});
+
+// POST /api/movies/summary — Used by AiSummary page and movieApi.js
+router.post('/summary', permissiveAuth, apiLimiter, async (req, res, next) => {
+  const query = req.body.question || req.body.movieName || req.body.title || req.body.query;
+
+  if (!query || query.trim() === '') {
+    return res.status(400).json({ error: 'Movie name or question is required' });
+  }
+
+  try {
+    const result = await generateMovieInsight({
+      query: query.trim(),
+      omdbApiKey: OMDB_API_KEY,
+      groqApiKey: GROQ_API_KEY,
+      groqModel: GROQ_MODEL,
+    });
+
+    return res.json({
+      answer: result.answer,
+      summary: result.summary,
+      source: result.source,
+      title: result.title,
+      year: result.year,
+      rating: result.rating,
+      poster: result.poster,
+    });
+  } catch (error) {
+    console.error('Error generating movie insight (POST):', error.message);
+    next(createError(500, 'Failed to generate movie insight'));
+  }
+});
+
 // Get movie details - MUST be after other specific routes
 router.get('/:imdbId', auth, apiLimiter, async (req, res, next) => {
   try {
@@ -235,52 +319,6 @@ router.get('/:imdbId', auth, apiLimiter, async (req, res, next) => {
   } catch (error) {
     console.error('Movie details error:', error);
     next(createError(500, 'Failed to get movie details'));
-  }
-});
-
-
-router.post('/summary', auth, apiLimiter, async (req, res, next) => {
-  const { question } = req.body;
-
-  if (!question || question.trim() === '') {
-    return res.status(400).json({ error: 'Question is required' });
-  }
-
-  if (!OPENAI_API_KEY) {
-    console.error('OPENAI_API_KEY is not configured');
-    return res.status(503).json({ error: 'Movie summary service is not configured' });
-  }
-
-  try {
-    const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
-    const completion = await openai.chat.completions.create({
-      model: OPENAI_MODEL,
-      messages: [
-        {
-          role: 'system',
-          content: 'You are a movie expert AI assistant. Answer only questions related to movies, movie-related people, and the movie industry. Be informative and structure longer answers clearly. Do not invent facts or include images.',
-        },
-        { role: 'user', content: question },
-      ],
-      max_tokens: 4096,
-      temperature: 0.7,
-    });
-
-    const aiAnswer = completion.choices[0]?.message?.content || 'Answer not available.';
-
-    // Remove image URLs extraction and base64 conversion to avoid images in the answer
-    // Just return the AI answer text as is without modification
-    // aiAnswer remains unchanged
-
-    return res.json({ answer: aiAnswer });
-  } catch (error) {
-    if (error.status) {
-      console.error('OpenAI API error:', error.status, error.message);
-      return next(createError(502, 'Movie summary provider failed'));
-    } else {
-      console.error('Error generating movie summary:', error.message);
-    }
-    next(createError(500, 'Failed to generate answer'));
   }
 });
 
