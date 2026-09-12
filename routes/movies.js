@@ -263,9 +263,7 @@ router.post('/summary', auth, apiLimiter, async (req, res, next) => {
   - Avoid major spoilers unless the user asks for plot details. If spoilers are needed, label the section "Spoilers".
   - When the user names a movie without a specific question, provide a concise overview covering the premise, genre, release year, main cast, director, themes, and why it may be worth watching.
   - If the question is unrelated to movies or the film industry, politely explain that you only answer movie-related questions.
-  - When relevant, add a "Useful Links" section with safe, useful links such as the official movie site, IMDb, a trailer, or a reputable source.
-  - You may include one relevant photo or poster URL using Markdown image syntax, but only when you know the URL is valid. Never invent URLs; omit the photo when uncertain.
-  - Write links as complete HTTPS URLs so they remain usable in plain text.
+  - Do not include images, raw URLs, or unsupported claims.
 
   Answer the user's question now.`;
     const groqResponse = await axiosInstance.post(
