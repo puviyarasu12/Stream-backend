@@ -1,3 +1,4 @@
+
 const express = require('express');
 const router = express.Router();
 const axios = require('axios');
@@ -321,7 +322,6 @@ router.get('/:imdbId', auth, apiLimiter, async (req, res, next) => {
     next(createError(500, 'Failed to get movie details'));
   }
 });
-
 
 
 // Error handling middleware
