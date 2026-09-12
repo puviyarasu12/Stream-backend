@@ -274,7 +274,7 @@ router.post('/summary', auth, apiLimiter, async (req, res, next) => {
           { role: 'system', content: prompt },
           { role: 'user', content: question },
         ],
-        max_tokens: 4096,
+        max_tokens: 1024,
         temperature: 0.7,
       },
       {
@@ -295,7 +295,11 @@ router.post('/summary', auth, apiLimiter, async (req, res, next) => {
   } catch (error) {
     if (error.response) {
       const providerStatus = error.response.status;
+      const retryAfter = error.response.headers?.['retry-after'];
       console.error('Groq API error:', providerStatus, error.response.data?.error?.message || 'request failed');
+      if (retryAfter) {
+        res.set('Retry-After', retryAfter);
+      }
       return res.status(providerStatus === 401 || providerStatus === 429 ? providerStatus : 502).json({
         error: providerStatus === 401
           ? 'Movie summary provider rejected the API key'
